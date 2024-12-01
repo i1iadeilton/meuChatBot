@@ -3,6 +3,10 @@ import requests
 from bs4 import BeautifulSoup
 import unicodedata
 import re
+import random
+import spacy
+
+nlp = spacy.load('pt_core_news_sm')
 
 class Chatbot:
     def __init__(self, master):
@@ -49,24 +53,28 @@ class Chatbot:
         if not user_input:
             return
 
+        # Exibir a entrada do usuário na área de texto
         self.text_area.configure(state="normal")
         self.text_area.insert(ctk.END, "Você: " + user_input + "\n")
         self.text_area.configure(state="disabled")
 
-        # Processar a entrada do usuário
+        # Limpar o campo de entrada
+        self.entry.delete(0, ctk.END)
+
+        # Processar a entrada e obter a resposta
         response = self.get_response(user_input)
 
+        # Exibir a resposta do chatbot
         self.text_area.configure(state="normal")
         self.text_area.insert(ctk.END, "Artemis: " + response + "\n")
         self.text_area.configure(state="disabled")
 
-        self.entry.delete(0, ctk.END)
-
-    def normalize_string(self, s):
-        # Remover acentos e converter para minúsculas
-        return unicodedata.normalize('NFKD', s).encode('ASCII', 'ignore').decode('utf-8').lower()
+    def normalize_string(self, user_input):
+        # Remover acentos e normalizar a string
+        return unicodedata.normalize('NFKD', user_input).encode('ASCII', 'ignore').decode('ASCII')
 
     def tokenize_input(self, user_input):
+        doc = nlp(user_input.lower())
         tokens = {
             "ano": None,
             "mes": None,
@@ -74,23 +82,31 @@ class Chatbot:
             "tipo_imposto": []
         }
 
-        # Procurar por ano, mês e UF
-        ano_match = re.search(r'\b(20\d{2})\b', user_input)
-        if ano_match:
-            tokens["ano"] = ano_match.group(1)
+        def tokenize_input_with_spacy(self, user_input):
+            doc = nlp(user_input.lower())
+            tokens = {
+                "ano": None,
+                "mes": None,
+                "sigla_uf": None,
+                "tipo_imposto": []
+            }
 
-        mes_match = re.search(r'\b(jan(?:eiro)?|fev(?:ereiro)?|mar(?:ço)?|abr(?:il)?|mai(?:o)?|jun(?:ho)?|jul(?:ho)?|ago(?:sto)?|set(?:embro)?|out(?:ubro)?|nov(?:embro)?|dez(?:embro)?)\b', user_input)
-        if mes_match:
-            tokens["mes"] = mes_match.group(1)[:3].lower()
+        # Identificar entidades nomeadas
+        # Identificar entidades nomeadas
+        for ent in doc.ents:
+            if ent.label_ == "DATE" and len(ent.text) == 4:  # Ano
+                tokens["ano"] = ent.text    
+        # Se o ano não foi encontrado via spaCy, podemos tentar uma extração direta
+        if not tokens["ano"]:
+            year_match = re.search(r"\b(\d{4})\b", user_input)
+            if year_match:
+                tokens["ano"] = year_match.group(1)    
 
-        uf_match = re.search(r'\b(?:ac|al|ap|am|ba|ce|df|es|go|ma|mt|ms|mg|pa|pb|pr|pe|pi|rj|rn|rs|ro|rr|sc|sp|se|to)\b', user_input)
-        if uf_match:
-            tokens["sigla_uf"] = uf_match.group(0).upper()
-
-        # Procurar tipo de imposto usando o dicionário de sinônimos
-        for key, synonyms in self.synonym_dict.items():
-            if any(synonym in user_input for synonym in synonyms):
-                tokens["tipo_imposto"].append(key)
+        # Procurar por sinônimos de impostos nos tokens
+        for token in doc:
+            for key, synonyms in self.synonym_dict.items():
+                if token.lemma_ in synonyms:
+                    tokens["tipo_imposto"].append(key)
 
         return tokens
 
@@ -119,7 +135,6 @@ class Chatbot:
 
                     # Checar condições com base nos tokens
                     if (tokens["ano"] == ano_cell if tokens["ano"] else True) and \
-                       (tokens["mes"] == mes_cell if tokens["mes"] else True) and \
                        (tokens["sigla_uf"] == uf_cell if tokens["sigla_uf"] else True):
 
                         # Responder com os tipos de imposto solicitados
@@ -131,20 +146,13 @@ class Chatbot:
                         if response_lines:
                             return "\n".join(response_lines)
                         else:
-                            # Resposta completa caso não haja um tipo de imposto específico
-                            return (f"Aqui estão os dados para {mes_cell}/{ano_cell} em {uf_cell}:\n"
-                                    f"Imposto Importação: R${cells[3].get_text().strip()}\n"
-                                    f"Imposto Exportação: R${cells[4].get_text().strip()}\n"
-                                    f"IPI Fumo: R${cells[5].get_text().strip()}\n"
-                                    f"IPI Bebidas: R${cells[6].get_text().strip()}\n"
-                                    f"IPI Automóveis: R${cells[7].get_text().strip()}\n"
-                                    f"IPI Importações: R${cells[8].get_text().strip()}")
+                            return "Nenhum dado encontrado para os critérios especificados."
 
-                return "Não encontrei dados correspondentes para os parâmetros especificados."
+                return random.choice(self.no_data_responses)
             else:
-                return "Desculpe, não consegui acessar a tabela no momento."
+                return random.choice(self.error_responses)
         except requests.exceptions.RequestException as e:
-            return f"Erro ao conectar com a tabela: {e}"
+            return random.choice(self.error_responses)
 
 if __name__ == "__main__":
     root = ctk.CTk()
